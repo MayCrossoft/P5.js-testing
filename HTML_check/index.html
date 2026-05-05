@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Диффузия чернил в воде</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: white;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="diffusionCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('diffusionCanvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Параметры симуляции
+        const gridSize = 50; // Размер сетки для уравнения диффузии
+        const cellSize = Math.min(canvas.width, canvas.height) / gridSize;
+        const diffusionRate = 0.2; // Коэффициент диффузии
+        const particleCount = 500; // Количество частиц для броуновского движения
+        const dropInterval = 3000; // Интервал добавления капель (мс)
+
+        // Сетка для уравнения диффузии (концентрация чернил)
+        let concentrationGrid = Array(gridSize).fill().map(() => Array(gridSize).fill(0));
+        let nextConcentrationGrid = Array(gridSize).fill().map(() => Array(gridSize).fill(0));
+
+        // Частицы для броуновского движения
+        let particles = [];
+
+        class Particle {
+            constructor() {
+                this.reset();
+            }
+
+            reset() {
+                // Начальная позиция — центр сверху (место падения капли)
+                this.x = gridSize / 2 + (Math.random() - 0.5) * 5;
+                this.y = 2;
+                this.concentration = 1.0;
+                this.active = true;
+            }
+
+            update() {
+                if (!this.active) return;
+
+                // Броуновское движение с учётом градиента концентрации
+                const gridX = Math.floor(this.x);
+                const gridY = Math.floor(this.y);
+
+                let forceX = 0, forceY = 0;
+
+                // Учитываем градиент концентрации (диффузионная сила)
+                if (gridX > 0 && gridX < gridSize - 1 && gridY > 0 && gridY < gridSize - 1) {
+                    const gradX = concentrationGrid[gridY][gridX + 1] - concentrationGrid[gridY][gridX - 1];
+                    const gradY = concentrationGrid[gridY + 1][gridX] - concentrationGrid[gridY - 1][gridX];
+                    forceX -= gradX * 0.1;
+                    forceY -= gradY * 0.1;
+                }
+
+                // Случайное броуновское движение
+                forceX += (Math.random() - 0.5) * 0.8;
+                forceY += (Math.random() - 0.5) * 0.8 + 0.3; // Лёгкий дрейф вниз
+
+                this.x += forceX;
+                this.y += forceY;
+
+                // Диффузия концентрации вокруг частицы
+                if (gridX >= 0 && gridX < gridSize && gridY >= 0 && gridY < gridSize) {
+                    concentrationGrid[gridY][gridX] += this.concentration * 0.02;
+                }
+
+                // Частица исчезает со временем
+                this.concentration *= 0.995;
+
+                // Если частица слишком слабая или вышла за пределы — сбрасываем
+                if (this.concentration < 0.01 ||
+                    this.x < 0 || this.x >= gridSize ||
+                    this.y < 0 || this.y >= gridSize) {
+                    this.reset();
+                }
+            }
+        }
+
+        // Инициализация частиц
+        for (let i = 0; i < particleCount; i++) {
+            particles.push(new Particle());
+        }
+
+        // Функция для добавления капли чернил
+        function addInkDrop() {
+            const centerX = Math.floor(gridSize / 2);
+            const centerY = 2;
+
+            // Добавляем концентрацию в центре
+            for (let y = centerY - 2; y <= centerY + 2; y++) {
+                for (let x = centerX - 2; x <= centerX + 2; x++) {
+                    if (x >= 0 && x < gridSize && y >= 0 && y < gridSize) {
+                        concentrationGrid[y][x] += 0.8;
+                    }
+                }
+            }
+        }
+
+        // Уравнение диффузии
+        function diffuse() {
+            // Копируем текущую сетку
+            for (let y = 0; y < gridSize; y++) {
+                for (let x = 0; x < gridSize; x++) {
+                    nextConcentrationGrid[y][x] = concentrationGrid[y][x];
+                }
+            }
+
+            // Применяем уравнение диффузии: C(t+dt) = C(t) + D * laplacian(C)
+            for (let y = 1; y < gridSize - 1; y++) {
+                for (let x = 1; x < gridSize - 1; x++) {
+                    const laplacian = concentrationGrid[y + 1][x] +
+                                   concentrationGrid[y - 1][x] +
+                                   concentrationGrid[y][x + 1] +
+                                   concentrationGrid[y][x - 1] -
+                                   4 * concentrationGrid[y][x];
+
+                    nextConcentrationGrid[y][x] += diffusionRate * laplacian;
+
+                    // Естественное затухание
+                    nextConcentrationGrid[y][x] *= 0.995;
+                }
+            }
+
+            // Обновляем сетку
+            [concentrationGrid, nextConcentrationGrid] = [nextConcentrationGrid, concentrationGrid];
+        }
+
+        // Отрисовка
+        function draw() {
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Отрисовываем концентрацию чернил
+            for (let y = 0; y < gridSize; y++) {
+                for (let x = 0; x < gridSize; x++) {
+                    const concentration = concentrationGrid[y][x];
+                    if (concentration > 0) {
+                        const alpha = Math.min(concentration, 1);
+                        ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`;
+                        ctx.fillRect(
+                            x * cellSize,
+                            y * cellSize,
+                            cellSize,
+                            cellSize
+                        );
+                    }
+                }
+            }
+
+            // Отрисовываем частицы (для дополнительной детализации)
+            particles.forEach(particle => {
+                if (particle.active) {
+                    ctx.fillStyle = `rgba(0, 0, 0, ${particle.concentration})`;
+                    ctx.beginPath();
+                    ctx.arc(
+                        particle.x * cellSize,
+                        particle.y * cellSize,
+                        cellSize * 0.3,
+                        0,
+                        2 * Math.PI
+                    );
+                    ctx.fill();
+                }
+            });
+        }
+
+        // Основной цикл анимации
+        let lastDropTime = 0;
+        function animate(currentTime) {
+            // Добавляем новую каплю каждые несколько секунд
+            if (currentTime - lastDropTime > dropInterval) {
+                addInkDrop();
+                lastDropTime = currentTime;
+            }
+
+            // Обновляем физические системы
+            diffuse();
+            particles.forEach(particle => particle.update());
+
+            // Отрисовываем результат
+            draw();
+
+            requestAnimationFrame(animate);
+        }
+
+        // Запускаем анимацию
+        animate(0);
+
+        // Обработка изменения размера окна
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            cellSize = Math.min(canvas.width, canvas.height) / gridSize;
+        });
+    </script>
